@@ -1,65 +1,89 @@
+# bot/notifications.py
+import os
 import httpx
 import logging
 from datetime import date, timedelta
 from telegram import Bot
 from bot.database import get_session, User
 from database.figi_lookup import get_figi_by_ticker_and_classcode
+from database.moex_lookup import get_bond_coupons_from_moex
+from dotenv import load_dotenv
 
-# Константы для API
-API_TOKEN = "t.yOBlCXQ3CL8QnMkpwSZZbLML7tbxqyucssGMrpv8i5nB4sgG36JlqRCfy456xOw3BjvWdfTCHIC7t5mcjuZL4Q"  # Токен для API T-Invest
-BASE_URL = "https://invest-public-api.tinkoff.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondCoupons"
+load_dotenv()
+API_TOKEN = os.getenv("T_TOKEN")
+BASE_URL_TINKOFF = "https://invest-public-api.tinkoff.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondCoupons"
 
 
-async def get_bond_coupons(figi: str, from_date: str, to_date: str):
-    """Функция для получения информации о купонах облигации с API T-Invest."""
+async def get_bond_coupons_tinkoff(figi: str, from_date: str, to_date: str):
+    """Получение информации о купонах облигации с API Tinkoff Invest."""
     headers = {
         "Authorization": f"Bearer {API_TOKEN}"
     }
     params = {
-        "instrumentId": figi,  # идентификатор облигации
-        "from": from_date,  # начало периода
-        "to": to_date  # конец периода
+        "instrumentId": figi,
+        "from": from_date,
+        "to": to_date
     }
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(BASE_URL, headers=headers, json=params)
-            response.raise_for_status()  # Проверка на успешный запрос
+            response = await client.post(BASE_URL_TINKOFF, headers=headers, json=params)
+            response.raise_for_status()
             data = response.json()
-            return data.get("events", [])  # Возвращаем список событий (купонов)
+            return data.get("events", [])
     except httpx.RequestError as e:
-        logging.error(f"Ошибка при запросе к API T-Invest: {e}")
+        logging.error(f"❌ Ошибка при запросе к API T-Invest: {e}")
         return []
 
 
-# Основная проверка уведомлений
 async def check_and_notify(bot: Bot):
     logging.info("🔄 Проверка уведомлений запущена...")
     today = date.today()
-    notify_date = today + timedelta(days=3)  # уведомления за 3 дня
+    notify_date = today + timedelta(days=3)
 
     session = get_session()
     users = session.query(User).all()
 
     for user in users:
         for bond in user.tracked_bonds:
-            # Получаем события (например, купоны) для облигации
-            from_date = today.isoformat()  # текущая дата
-            to_date = (today + timedelta(days=4)).isoformat()  # через 3 дня
-            events = await get_bond_coupons(bond.figi, from_date, to_date)
+            from_date = today.isoformat()
+            to_date = (today + timedelta(days=4)).isoformat()
+
+            # Пробуем получить купоны от Tinkoff
+            events = await get_bond_coupons_tinkoff(bond.figi, from_date, to_date)
+
+            # Если не получили ничего — используем MOEX как запасной план
+            if not events:
+                logging.info(f"🔁 Данные не найдены в T-Invest для {bond.figi}, пробуем МОЕКС.")
+                events = await get_bond_coupons_from_moex(bond.isin)
 
             for event in events:
-                event_date = event.get("couponDate")
-                event_type = event.get("couponType")
-                event_amount = event.get("payOneBond", {}).get("value", 0)
+                # Унифицированная обработка событий из двух источников
+                event_date = (
+                    event.get("couponDate") or
+                    event.get("COUPONDATE")
+                )
+                event_amount = (
+                    event.get("payOneBond", {}).get("value") or
+                    event.get("COUPONVALUE") or
+                    event.get("couponValue")
+                )
+                event_type = (
+                    event.get("couponType") or
+                    event.get("type") or
+                    "COUPON"
+                )
 
-                # Преобразуем строку с датой в объект date
-                event_date = date.fromisoformat(event_date.split("T")[0])
+                if event_date:
+                    event_date = date.fromisoformat(event_date.split("T")[0])
 
-                if event_date == notify_date:
-                    text = f"🔔 Напоминание: через 3 дня ({event_date}) у бумаги {bond.isin} — событие: {event_type.upper()}.\nСумма купона: {event_amount}."
-                    try:
-                        await bot.send_message(chat_id=user.tg_id, text=text)
-                        logging.info(f"✅ Уведомление отправлено: {user.full_name} — {bond.isin}")
-                    except Exception as e:
-                        logging.error(f"❌ Не удалось отправить уведомление: {e}")
+                    if event_date == notify_date:
+                        text = (
+                            f"🔔 Напоминание: через 3 дня ({event_date}) у бумаги {bond.isin} — событие: {event_type.upper()}.\n"
+                            f"Сумма купона: {event_amount} руб."
+                        )
+                        try:
+                            await bot.send_message(chat_id=user.tg_id, text=text)
+                            logging.info(f"✅ Уведомление отправлено: {user.full_name} — {bond.isin}")
+                        except Exception as e:
+                            logging.error(f"❌ Не удалось отправить уведомление: {e}")

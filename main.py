@@ -1,3 +1,6 @@
+# main.py
+
+import io
 import logging
 from telegram.ext import Application
 from telegram.ext import ContextTypes
@@ -9,6 +12,8 @@ from bot.notifications import check_and_notify
 from database.update import update_bond_data
 import sys
 import os
+sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
 sys.stdout.reconfigure(encoding='utf-8')
 os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -58,3 +63,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

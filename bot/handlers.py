@@ -5,6 +5,8 @@ from bot.database import get_session, User
 import re
 from bot.database import TrackedBond
 from database.figi_lookup import get_figi_by_ticker_and_classcode
+from sqlalchemy.orm import selectinload
+from database.moex_name_lookup import get_bond_name_from_moex
 
 ISIN_PATTERN = re.compile(r'^[A-Z]{2}[A-Z0-9]{10}$')  # Пример: RU000A105TJ2
 AWAITING_ISIN_TO_REMOVE = 1
@@ -35,18 +37,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_tracked_bonds(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session = get_session()
-    user = session.query(User).filter_by(tg_id=update.effective_user.id).first()
+    user = session.query(User) \
+        .options(selectinload(User.tracked_bonds)) \
+        .filter_by(tg_id=update.effective_user.id) \
+        .first()
 
     if not user or not user.tracked_bonds:
         await update.message.reply_text("❗️Ты пока не отслеживаешь ни одной облигации.")
+        session.close()
         return
 
     text = "📋 Вот список твоих отслеживаемых бумаг:\n\n"
     for bond in user.tracked_bonds:
         added = bond.added_at.strftime("%Y-%m-%d")
-        display_name = bond.name or f"{bond.isin}"  # Если название отсутствует
+
+        # Если имя не найдено, получаем имя с MOEX
+        display_name = bond.name
+        if not display_name:
+            moex_name = await get_bond_name_from_moex(bond.isin)
+            if moex_name:
+                display_name = moex_name
+                bond.name = moex_name
+                session.commit()  # Обновляем имя в базе
+
+        # Если имя всё ещё пустое, показываем ISIN
+        if not display_name:
+            display_name = bond.isin
+
         text += f"• {display_name} ({bond.isin}, добавлена {added})\n"
 
+    session.close()
     await update.message.reply_text(text)
 
 
@@ -71,15 +91,23 @@ async def process_add_isin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Ты уже отслеживаешь эту бумагу.")
         return ConversationHandler.END
 
-    bond = TrackedBond(user_id=user_id, isin=text)
+    # Добавляем с названием с MOEX (если получится)
+    moex_name = await get_bond_name_from_moex(text)
+    bond = TrackedBond(user_id=user_id, isin=text, name=moex_name)
     session.add(bond)
     session.commit()
 
-    # 👉 Добавляем вызов для получения FIGI и classCode
+    # Пробуем обогатить FIGI и classCode через Tinkoff
     try:
         await get_figi_by_ticker_and_classcode(text)
     except Exception as e:
         context.bot_data.get("logger", print)(f"⚠️ Не удалось получить FIGI для {text}: {e}")
+
+    # Проверяем, нужно ли обновить имя после Tinkoff-запроса
+    bond = session.query(TrackedBond).filter_by(user_id=user_id, isin=text).first()
+    if not bond.name and moex_name:
+        bond.name = moex_name
+        session.commit()
 
     await update.message.reply_text(f"📌 Бумага {text} добавлена!")
     return ConversationHandler.END

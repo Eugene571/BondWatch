@@ -16,7 +16,6 @@ async def get_figi_by_ticker_and_classcode(ticker: str, default_class_code: str 
         "Authorization": f"Bearer {TOKEN}"
     }
 
-    # Список classCode: дефолтный + запасные
     class_codes_to_try = [default_class_code, "TQOB", "TQOD", "TQIR"]
 
     for class_code in class_codes_to_try:
@@ -32,12 +31,11 @@ async def get_figi_by_ticker_and_classcode(ticker: str, default_class_code: str 
                 response.raise_for_status()
                 data = response.json()
 
-                # Получаем figi и название облигации
                 instrument = data["instrument"]
                 figi = instrument["figi"]
                 name = instrument["name"]
 
-                from database.update import update_tracked_bond_figi  # Импорт внутрь функции
+                from database.update import update_tracked_bond_figi  # ⬅️ импорт внутрь
                 await update_tracked_bond_figi(ticker, figi, class_code, name)
 
                 return figi
@@ -45,4 +43,8 @@ async def get_figi_by_ticker_and_classcode(ticker: str, default_class_code: str 
             except (httpx.HTTPStatusError, KeyError):
                 continue  # Пробуем следующий classCode
 
-    raise ValueError(f"Не удалось найти FIGI для тикера {ticker} ни с одним из classCode")
+    # Если ни один classCode не сработал — записываем как не найденную
+    from database.update import mark_bond_as_not_found
+    await mark_bond_as_not_found(ticker)
+
+    raise ValueError(f"❌ Не удалось найти FIGI для тикера {ticker}")

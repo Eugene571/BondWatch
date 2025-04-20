@@ -1,4 +1,4 @@
-# bot/database.py
+# bot.database.py
 
 from sqlalchemy import create_engine, Column, Integer, String, BigInteger, ForeignKey, DateTime
 from sqlalchemy.ext.declarative import declarative_base
