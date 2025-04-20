@@ -1,8 +1,10 @@
+# bot.handlers.py
 from telegram import Update
 from telegram.ext import CommandHandler, Application, ContextTypes, filters, MessageHandler, ConversationHandler
 from bot.database import get_session, User
 import re
 from bot.database import TrackedBond
+from database.figi_lookup import get_figi_by_ticker_and_classcode
 
 ISIN_PATTERN = re.compile(r'^[A-Z]{2}[A-Z0-9]{10}$')  # Пример: RU000A105TJ2
 AWAITING_ISIN_TO_REMOVE = 1
@@ -42,7 +44,8 @@ async def list_tracked_bonds(update: Update, context: ContextTypes.DEFAULT_TYPE)
     text = "📋 Вот список твоих отслеживаемых бумаг:\n\n"
     for bond in user.tracked_bonds:
         added = bond.added_at.strftime("%Y-%m-%d")
-        text += f"• {bond.isin} (добавлена {added})\n"
+        display_name = bond.name or f"{bond.isin}"  # Если название отсутствует
+        text += f"• {display_name} ({bond.isin}, добавлена {added})\n"
 
     await update.message.reply_text(text)
 
@@ -71,6 +74,12 @@ async def process_add_isin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bond = TrackedBond(user_id=user_id, isin=text)
     session.add(bond)
     session.commit()
+
+    # 👉 Добавляем вызов для получения FIGI и classCode
+    try:
+        await get_figi_by_ticker_and_classcode(text)
+    except Exception as e:
+        context.bot_data.get("logger", print)(f"⚠️ Не удалось получить FIGI для {text}: {e}")
 
     await update.message.reply_text(f"📌 Бумага {text} добавлена!")
     return ConversationHandler.END

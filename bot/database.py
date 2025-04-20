@@ -1,7 +1,11 @@
+# bot/database.py
+
 from sqlalchemy import create_engine, Column, Integer, String, BigInteger, ForeignKey, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timedelta
+
+from database.update import update_tracked_bond_figi  # Импортируем функцию для обновления данных в БД
 
 # Создаём движок SQLite
 engine = create_engine("sqlite:///bot.db")
@@ -13,18 +17,10 @@ def get_session():
     return Session()
 
 
+# Функция для инициализации базы данных
 def init_db():
+    # Создаём все таблицы, если они ещё не существуют
     Base.metadata.create_all(engine)
-
-
-async def update_tracked_bond_figi(isin: str, figi: str, class_code: str):
-    """Обновить информацию о tracked_bond в базе данных"""
-    session = get_session()
-    bond = session.query(TrackedBond).filter_by(isin=isin).first()
-    if bond:
-        bond.figi = figi
-        bond.class_code = class_code
-        session.commit()
 
 
 # Модель пользователя
@@ -42,12 +38,13 @@ class User(Base):
 # Модель отслеживаемой облигации
 class TrackedBond(Base):
     __tablename__ = "tracked_bonds"
-
     id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey("users.tg_id"))
+    name = Column(String, nullable=True)
     isin = Column(String(12), nullable=False)
-    figi = Column(String, nullable=True)  # Добавили поле для FIGI
-    class_code = Column(String, nullable=True)  # Добавили поле для class_code
+    figi = Column(String, nullable=True)  # Поле для FIGI
+    class_code = Column(String, nullable=True)  # Поле для class_code
     added_at = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=datetime.utcnow)  # Поле для даты последнего обновления
 
     user = relationship("User", back_populates="tracked_bonds")

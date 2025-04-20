@@ -6,6 +6,12 @@ from bot.handlers import register_handlers
 from bot.database import init_db
 from apscheduler.schedulers.background import BackgroundScheduler
 from bot.notifications import check_and_notify
+from database.update import update_bond_data
+import sys
+import os
+
+sys.stdout.reconfigure(encoding='utf-8')
+os.environ["PYTHONIOENCODING"] = "utf-8"
 
 # Настройка логгирования
 logging.basicConfig(
@@ -36,7 +42,14 @@ def main():
 
     # Настройка APScheduler с использованием job queue
     scheduler = BackgroundScheduler()
+
+    # Добавляем задачу для проверки и уведомления о событиях
     scheduler.add_job(check_and_notify, 'interval', seconds=30, args=[app.bot])
+
+    # Добавляем задачу для обновления данных облигаций раз в сутки
+    scheduler.add_job(update_bond_data, 'interval', hours=24)
+
+    # Запускаем планировщик
     scheduler.start()
 
     logging.info("Bot started...")
