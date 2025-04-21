@@ -1,4 +1,4 @@
-
+# database.bond_update
 from datetime import datetime, timedelta
 from database.moex_lookup import get_bond_coupons_from_moex
 from bot.notifications import get_bond_coupons_tinkoff

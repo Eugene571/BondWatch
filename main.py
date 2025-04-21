@@ -6,7 +6,7 @@ from telegram.ext import Application
 from telegram.ext import ContextTypes
 from config import TELEGRAM_TOKEN
 from bot.handlers import register_handlers
-from bot.database import init_db
+from bot.DB import init_db
 from apscheduler.schedulers.background import BackgroundScheduler
 from bot.notifications import check_and_notify
 from database.update import update_bond_data

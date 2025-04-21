@@ -4,32 +4,42 @@ import httpx
 import logging
 from datetime import date, timedelta
 from telegram import Bot
-from bot.database import get_session, User
-from database.figi_lookup import get_figi_by_ticker_and_classcode
-from database.moex_lookup import get_bond_coupons_from_moex
+from bot.DB import get_session, User
+import datetime
 from dotenv import load_dotenv
+
+from database.moex_lookup import get_bond_coupons_from_moex
 
 load_dotenv()
 API_TOKEN = os.getenv("T_TOKEN")
 BASE_URL_TINKOFF = "https://invest-public-api.tinkoff.ru/rest/tinkoff.public.invest.api.contract.v1.InstrumentsService/GetBondCoupons"
 
 
-async def get_bond_coupons_tinkoff(figi: str, from_date: str, to_date: str):
+async def get_bond_coupons_tinkoff(figi: str, from_date: datetime, to_date: datetime):
     """Получение информации о купонах облигации с API Tinkoff Invest."""
     headers = {
         "Authorization": f"Bearer {API_TOKEN}"
     }
+
+    # Преобразуем объекты datetime в строку в формате ISO 8601 с временем
     params = {
         "instrumentId": figi,
-        "from": from_date,
-        "to": to_date
+        "from": from_date.isoformat(),  # Преобразуем datetime в строку
+        "to": to_date.isoformat()  # Преобразуем datetime в строку
     }
 
     try:
+        # Логирование запроса
+        logging.info(f"🔄 Отправка запроса к Tinkoff API с параметрами: {params}")
+
         async with httpx.AsyncClient() as client:
             response = await client.post(BASE_URL_TINKOFF, headers=headers, json=params)
             response.raise_for_status()
             data = response.json()
+
+            # Логирование ответа
+            logging.info(f"📄 Ответ от Tinkoff API: {data}")
+
             return data.get("events", [])
     except httpx.RequestError as e:
         logging.error(f"❌ Ошибка при запросе к API T-Invest: {e}")
@@ -59,25 +69,24 @@ async def check_and_notify(bot: Bot):
 
             for event in events:
                 # Унифицированная обработка событий из двух источников
-                event_date = (
-                    event.get("couponDate") or
-                    event.get("COUPONDATE")
-                )
-                event_amount = (
-                    event.get("payOneBond", {}).get("value") or
-                    event.get("COUPONVALUE") or
-                    event.get("couponValue")
-                )
-                event_type = (
-                    event.get("couponType") or
-                    event.get("type") or
-                    "COUPON"
-                )
+                event_date = event.get("couponDate") or event.get("COUPONDATE")
+                event_amount_units = event.get("payOneBond", {}).get("units")
+                event_amount_nano = event.get("payOneBond", {}).get("nano")
 
-                if event_date:
+                if event_date and event_amount_units is not None and event_amount_nano is not None:
                     event_date = date.fromisoformat(event_date.split("T")[0])
 
-                    if event_date == notify_date:
+                    # Рассчитываем полную сумму купона (в рублях) с учетом units и nano
+                    event_amount = int(event_amount_units) + int(event_amount_nano) / 1e9  # Переводим в рубли
+
+                    # Обновление данных для следующего купона в БД
+                    if event_date > today:  # Только для будущих событий
+                        bond.next_coupon_date = event_date
+                        bond.next_coupon_value = event_amount
+                        session.commit()  # Сохраняем изменения в БД
+                        logging.info(f"✅ Данные обновлены для облигации {bond.isin}: "
+                                     f"next_coupon_date = {event_date}, next_coupon_value = {event_amount}")
+                    elif event_date == notify_date:
                         text = (
                             f"🔔 Напоминание: через 3 дня ({event_date}) у бумаги {bond.isin} — событие: {event_type.upper()}.\n"
                             f"Сумма купона: {event_amount} руб."

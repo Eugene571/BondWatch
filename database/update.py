@@ -6,7 +6,7 @@ from database.bond_update import get_next_coupon
 
 
 async def update_tracked_bond_figi(isin: str, figi: str, class_code: str, name: str):
-    from bot.database import get_session, TrackedBond
+    from bot.DB import get_session, TrackedBond
     session = get_session()
     try:
         bond = session.query(TrackedBond).filter_by(isin=isin).first()
@@ -31,7 +31,7 @@ async def update_tracked_bond_figi(isin: str, figi: str, class_code: str, name: 
 
 
 async def update_bond_data():
-    from bot.database import get_session, TrackedBond
+    from bot.DB import get_session, TrackedBond
     session = get_session()
     try:
         bonds_to_update = session.query(TrackedBond).filter(
@@ -65,7 +65,7 @@ async def update_bond_data():
 
 
 async def mark_bond_as_not_found(isin: str):
-    from bot.database import get_session, TrackedBond
+    from bot.DB import get_session, TrackedBond
     session = get_session()
     try:
         bond = session.query(TrackedBond).filter_by(isin=isin).first()

@@ -1,9 +1,10 @@
 # bot.handlers.py
 from telegram import Update
 from telegram.ext import CommandHandler, Application, ContextTypes, filters, MessageHandler, ConversationHandler
-from bot.database import get_session, User
+from bot.DB import get_session, User
 import re
-from bot.database import TrackedBond
+from bot.DB import TrackedBond
+from database.bond_update import get_next_coupon
 from database.figi_lookup import get_figi_by_ticker_and_classcode
 from sqlalchemy.orm import selectinload
 from database.moex_name_lookup import get_bond_name_from_moex
@@ -70,7 +71,15 @@ async def list_tracked_bonds(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if not display_name:
             display_name = bond.isin
 
-        text += f"• {display_name} ({bond.isin}, добавлена {added})\n"
+        # Получаем информацию о следующем купоне
+        next_coupon = await get_next_coupon(bond.isin, bond.figi)
+        next_coupon_text = ""
+        if next_coupon:
+            next_coupon_text = (
+                f"\n👉 Следующий купон: {next_coupon['next_coupon_date']} на сумму {next_coupon['next_coupon_value']} руб."
+            )
+
+        text += f"• {display_name} ({bond.isin}, добавлена {added}){next_coupon_text}\n"
 
     session.close()
     await update.message.reply_text(text)
