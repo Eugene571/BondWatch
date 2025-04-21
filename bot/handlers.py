@@ -8,6 +8,7 @@ from database.bond_update import get_next_coupon
 from database.figi_lookup import get_figi_by_ticker_and_classcode
 from sqlalchemy.orm import selectinload
 from database.moex_name_lookup import get_bond_name_from_moex
+from database.bond_utils import update_bond_coupon_info
 import logging
 import io
 import sys
@@ -106,7 +107,7 @@ async def process_add_isin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Ты уже отслеживаешь эту бумагу.")
         return ConversationHandler.END
 
-    # Добавляем с названием с MOEX (если получится)
+    # Получаем название с MOEX (если получится)
     moex_name = await get_bond_name_from_moex(text)
     bond = TrackedBond(user_id=user_id, isin=text, name=moex_name)
     session.add(bond)
@@ -118,11 +119,17 @@ async def process_add_isin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         context.bot_data.get("logger", print)(f"⚠️ Не удалось получить FIGI для {text}: {e}")
 
-    # Проверяем, нужно ли обновить имя после Tinkoff-запроса
+    # Повторно получаем bond после обновлений
     bond = session.query(TrackedBond).filter_by(user_id=user_id, isin=text).first()
+
+    # Обновляем имя, если нужно
     if not bond.name and moex_name:
         bond.name = moex_name
         session.commit()
+
+    # Обновляем инфу по ближайшему купону
+    logger = context.bot_data.get("logger", print)
+    await update_bond_coupon_info(bond, session, logger)
 
     await update.message.reply_text(f"📌 Бумага {text} добавлена!")
     return ConversationHandler.END

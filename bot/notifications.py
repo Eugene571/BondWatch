@@ -21,11 +21,11 @@ async def get_bond_coupons_tinkoff(figi: str, from_date: datetime, to_date: date
         "Authorization": f"Bearer {API_TOKEN}"
     }
 
-    # Преобразуем объекты datetime в строку в формате ISO 8601 с временем
+    # Преобразуем объекты datetime в строку в формате ISO 8601 с временем и 'Z'
     params = {
         "instrumentId": figi,
-        "from": from_date.isoformat(),  # Преобразуем datetime в строку
-        "to": to_date.isoformat()  # Преобразуем datetime в строку
+        "from": from_date.replace(microsecond=0).isoformat() + "Z",
+        "to": to_date.replace(microsecond=0).isoformat() + "Z"
     }
 
     try:
