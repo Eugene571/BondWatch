@@ -1,11 +1,9 @@
 # bot.database.py
 
-from sqlalchemy import create_engine, Column, Integer, String, BigInteger, ForeignKey, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, BigInteger, ForeignKey, DateTime, Date, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime, timedelta
-
-from database.update import update_tracked_bond_figi  # Импортируем функцию для обновления данных в БД
 
 # Создаём движок SQLite
 engine = create_engine("sqlite:///bot.db")
@@ -27,7 +25,8 @@ def init_db():
 class User(Base):
     __tablename__ = "users"
 
-    tg_id = Column(BigInteger, primary_key=True)
+    id = Column(Integer, primary_key=True)  # primary_key для id
+    tg_id = Column(BigInteger, unique=True)  # Уникальный tg_id
     full_name = Column(String)
 
     tracked_bonds = relationship(
@@ -38,13 +37,17 @@ class User(Base):
 # Модель отслеживаемой облигации
 class TrackedBond(Base):
     __tablename__ = "tracked_bonds"
+
     id = Column(Integer, primary_key=True)
-    user_id = Column(BigInteger, ForeignKey("users.tg_id"))
-    name = Column(String, nullable=True)
-    isin = Column(String(12), nullable=False)
-    figi = Column(String, nullable=True)  # Поле для FIGI
-    class_code = Column(String, nullable=True)  # Поле для class_code
+    user_id = Column(BigInteger, ForeignKey("users.tg_id"))  # Ссылаемся на tg_id
+    isin = Column(String, nullable=False)
+    name = Column(String)
+    figi = Column(String, nullable=True)
+    class_code = Column(String, nullable=True)
+    ticker = Column(String, nullable=True)
     added_at = Column(DateTime, default=datetime.utcnow)
-    last_updated = Column(DateTime, default=datetime.utcnow)  # Поле для даты последнего обновления
+    last_updated = Column(DateTime, default=datetime.utcnow)
+    next_coupon_date = Column(Date, nullable=True)
+    next_coupon_value = Column(Float, nullable=True)
 
     user = relationship("User", back_populates="tracked_bonds")

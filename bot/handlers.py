@@ -7,6 +7,11 @@ from bot.database import TrackedBond
 from database.figi_lookup import get_figi_by_ticker_and_classcode
 from sqlalchemy.orm import selectinload
 from database.moex_name_lookup import get_bond_name_from_moex
+import logging
+import io
+import sys
+sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 
 ISIN_PATTERN = re.compile(r'^[A-Z]{2}[A-Z0-9]{10}$')  # Пример: RU000A105TJ2
 AWAITING_ISIN_TO_REMOVE = 1
@@ -48,10 +53,11 @@ async def list_tracked_bonds(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     text = "📋 Вот список твоих отслеживаемых бумаг:\n\n"
+    logging.info(f"Found user {user.id} with {len(user.tracked_bonds)} tracked bonds.")
     for bond in user.tracked_bonds:
+        logging.info(f"Processing bond: {bond.isin}, Name: {bond.name}")
         added = bond.added_at.strftime("%Y-%m-%d")
 
-        # Если имя не найдено, получаем имя с MOEX
         display_name = bond.name
         if not display_name:
             moex_name = await get_bond_name_from_moex(bond.isin)
@@ -59,8 +65,8 @@ async def list_tracked_bonds(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 display_name = moex_name
                 bond.name = moex_name
                 session.commit()  # Обновляем имя в базе
+                logging.info(f"Bond name updated to: {display_name}")
 
-        # Если имя всё ещё пустое, показываем ISIN
         if not display_name:
             display_name = bond.isin
 
