@@ -66,18 +66,17 @@ async def list_tracked_bonds(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if moex_name:
                 display_name = moex_name
                 bond.name = moex_name
-                session.commit()  # Обновляем имя в базе
+                session.commit()
                 logging.info(f"Bond name updated to: {display_name}")
 
         if not display_name:
             display_name = bond.isin
 
-        # Получаем информацию о следующем купоне
-        next_coupon = await get_next_coupon(bond.isin, bond.figi)
+        # читаем купон из модели
         next_coupon_text = ""
-        if next_coupon:
+        if bond.next_coupon_date and bond.next_coupon_value:
             next_coupon_text = (
-                f"\n👉 Следующий купон: {next_coupon['next_coupon_date']} на сумму {next_coupon['next_coupon_value']} руб."
+                f"\n👉 Следующий купон: {bond.next_coupon_date} на сумму {bond.next_coupon_value} руб."
             )
 
         text += f"• {display_name} ({bond.isin}, добавлена {added}){next_coupon_text}\n"
@@ -98,8 +97,8 @@ async def process_add_isin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
 
     count = session.query(TrackedBond).filter_by(user_id=user_id).count()
-    if count >= 3:
-        await update.message.reply_text("❌ Ты уже отслеживаешь 3 бумаги. Удали одну, чтобы добавить новую.")
+    if count >= 5:
+        await update.message.reply_text("❌ Ты уже отслеживаешь 5 бумаг. Удали одну, чтобы добавить новую.")
         return ConversationHandler.END
 
     exists = session.query(TrackedBond).filter_by(user_id=user_id, isin=text).first()
@@ -107,29 +106,39 @@ async def process_add_isin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Ты уже отслеживаешь эту бумагу.")
         return ConversationHandler.END
 
-    # Получаем название с MOEX (если получится)
     moex_name = await get_bond_name_from_moex(text)
     bond = TrackedBond(user_id=user_id, isin=text, name=moex_name)
     session.add(bond)
     session.commit()
 
-    # Пробуем обогатить FIGI и classCode через Tinkoff
     try:
         await get_figi_by_ticker_and_classcode(text)
     except Exception as e:
         context.bot_data.get("logger", print)(f"⚠️ Не удалось получить FIGI для {text}: {e}")
 
-    # Повторно получаем bond после обновлений
     bond = session.query(TrackedBond).filter_by(user_id=user_id, isin=text).first()
 
-    # Обновляем имя, если нужно
     if not bond.name and moex_name:
         bond.name = moex_name
         session.commit()
 
-    # Обновляем инфу по ближайшему купону
     logger = context.bot_data.get("logger", print)
-    await update_bond_coupon_info(bond, session, logger)
+
+    # Пробуем сначала get_next_coupon
+    coupon_set = False
+    try:
+        next_coupon = await get_next_coupon(bond.isin, bond.figi, bond, session)
+        if next_coupon:
+            bond.next_coupon_date = next_coupon['date']
+            bond.next_coupon_value = next_coupon['value']
+            session.commit()
+            coupon_set = True
+    except Exception as e:
+        logger(f"⚠️ Не удалось получить следующий купон для {text}: {e}")
+
+    # Если купон не установлен — вызываем fallback
+    if not coupon_set:
+        await update_bond_coupon_info(bond, session, logger)
 
     await update.message.reply_text(f"📌 Бумага {text} добавлена!")
     return ConversationHandler.END

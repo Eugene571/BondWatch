@@ -1,4 +1,5 @@
 # database.update.py
+import logging
 from datetime import datetime, timedelta
 from database.figi_lookup import get_figi_by_ticker_and_classcode
 from database.moex_name_lookup import get_bond_name_from_moex
@@ -18,7 +19,7 @@ async def update_tracked_bond_figi(isin: str, figi: str, class_code: str, name: 
             bond.last_updated = datetime.utcnow()
 
             # Обновим купон, если есть FIGI или хотя бы ISIN
-            coupon_info = await get_next_coupon(bond.isin, bond.figi)
+            coupon_info = await get_next_coupon(bond.isin, bond.figi, bond, session)
             if coupon_info:
                 bond.next_coupon_date = coupon_info["next_coupon_date"]
                 bond.next_coupon_value = coupon_info["next_coupon_value"]
@@ -40,7 +41,12 @@ async def update_bond_data():
 
         for bond in bonds_to_update:
             try:
-                figi = await get_figi_by_ticker_and_classcode(bond.isin, bond.class_code or "TQCB")
+                figi = None
+                try:
+                    figi = await get_figi_by_ticker_and_classcode(bond.isin, bond.class_code or "TQCB")
+                except ValueError as e:
+                    logging.error(f"Ошибка при получении FIGI для облигации {bond.isin}: {e}")
+                    continue  # Если не удалось получить FIGI, пропускаем эту облигацию
 
                 if not bond.name:
                     name = await get_bond_name_from_moex(bond.isin)
@@ -51,7 +57,7 @@ async def update_bond_data():
                 bond.last_updated = datetime.utcnow()
 
                 # Обновим купонную информацию
-                coupon_info = await get_next_coupon(bond.isin, bond.figi)
+                coupon_info = await get_next_coupon(bond.isin, bond.figi, bond, session)
                 if coupon_info:
                     bond.next_coupon_date = coupon_info["next_coupon_date"]
                     bond.next_coupon_value = coupon_info["next_coupon_value"]
@@ -59,7 +65,7 @@ async def update_bond_data():
                 session.commit()
 
             except Exception as e:
-                print(f"Ошибка при обновлении облигации {bond.isin}: {e}")
+                logging.error(f"Ошибка при обновлении облигации {bond.isin}: {e}")
     finally:
         session.close()
 
