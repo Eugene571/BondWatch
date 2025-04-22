@@ -23,7 +23,7 @@ logging.basicConfig(
     level=logging.INFO,  # Можно оставить INFO вместо DEBUG, чтобы файл не забивался
     handlers=[
         logging.FileHandler("bot.log"),
-        # logging.StreamHandler()  # <== Удалено: теперь не логирует в консоль
+        logging.StreamHandler()  # <== Удалено: теперь не логирует в консоль
     ]
 )
 
